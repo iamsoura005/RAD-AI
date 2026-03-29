@@ -3,6 +3,7 @@ uvicorn[standard]
 tensorflow
 pillow
 numpy
+opencv-python-headless
 imageio
 google-genai
 python-multipart

@@ -1,9 +1,18 @@
 import os
 import numpy as np
 import tensorflow as tf
-import cv2
 import imageio
 from PIL import Image
+
+try:
+    import cv2
+except ImportError:  # pragma: no cover - defensive for minimal runtimes
+    cv2 = None
+
+
+def _require_cv2() -> None:
+    if cv2 is None:
+        raise RuntimeError("OpenCV is not installed. Install opencv-python-headless.")
 
 
 def find_last_conv_layer(model: tf.keras.Model) -> str | None:
@@ -48,6 +57,7 @@ def get_gradcam_heatmap(model: tf.keras.Model, image_path: str) -> np.ndarray | 
 
 
 def overlay_heatmap(image_path: str, heatmap: np.ndarray, alpha: float = 0.4) -> str:
+    _require_cv2()
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"Could not read image at {image_path}")
@@ -69,6 +79,7 @@ def overlay_heatmap(image_path: str, heatmap: np.ndarray, alpha: float = 0.4) ->
 
 
 def create_gradcam_gif(image_path: str, heatmap: np.ndarray) -> str:
+    _require_cv2()
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"Could not read image at {image_path}")
