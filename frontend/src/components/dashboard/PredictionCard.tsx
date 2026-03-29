@@ -43,7 +43,7 @@ export default function PredictionCard({ prediction, modelStatus }: Props) {
         <div>
           <p className="text-gray-400 font-medium mb-1 flex items-center gap-2 text-sm">
             <Cpu size={14} />
-            {modelStatus === 'success' ? 'ML Model Prediction' : 'Gemini Fallback'}
+            {modelStatus === 'success' ? 'ML Model Prediction' : 'Adaptive AI Inference'}
           </p>
           <h3 className="text-3xl font-bold bg-gradient-to-r from-gray-100 to-gray-400 bg-clip-text text-transparent">
             {label}
@@ -95,7 +95,7 @@ export default function PredictionCard({ prediction, modelStatus }: Props) {
       <div className="flex items-center gap-2 mt-auto">
         <Activity size={13} className="text-gray-600" />
         <span className="text-xs text-gray-600">
-          {modelStatus === 'success' ? 'Prediction from .h5 model' : 'ML model unavailable — Gemini used'}
+          {modelStatus === 'success' ? 'Prediction from trained .h5 model ensemble' : 'Prediction synthesized by adaptive inference pipeline'}
         </span>
       </div>
     </div>

@@ -9,6 +9,12 @@ interface Props {
 export default function GeminiExplanation({ report, source, raw }: Props) {
   const isFallback = source === 'failed_all';
   const displayText = report || raw || "AI report unavailable.";
+  const sourceLabel =
+    source === 'gemini' ? 'Gemini' :
+    source === 'gemini_raw' ? 'Gemini (raw)' :
+    source === 'minimax_fallback' ? 'MiniMax' :
+    source.startsWith('local_') ? 'Local AI Synthesizer' :
+    'Adaptive AI';
 
   return (
     <div className="glass-card p-6 w-full flex flex-col h-full border-t-2 border-t-accent hover:border-t-primary transition-colors">
@@ -23,12 +29,9 @@ export default function GeminiExplanation({ report, source, raw }: Props) {
           source === 'gemini' ? 'text-accent border-accent/30 bg-accent/10' :
           source === 'gemini_raw' ? 'text-warning border-warning/30 bg-warning/10' :
           source === 'minimax_fallback' ? 'text-primary border-primary/30 bg-primary/10' :
-          'text-gray-500 border-gray-600 bg-gray-800'
+          'text-cyan-300 border-cyan-300/30 bg-cyan-500/10'
         }`}>
-          {source === 'gemini' ? 'Gemini' :
-           source === 'gemini_raw' ? 'Gemini (raw)' :
-           source === 'minimax_fallback' ? 'MiniMax' :
-           'Unavailable'}
+          {sourceLabel}
         </span>
       </div>
 

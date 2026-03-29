@@ -1,10 +1,16 @@
 import os
+import html
 from datetime import datetime
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import cm
+
+
+def _safe_text(value: object) -> str:
+    text = "" if value is None else str(value)
+    return html.escape(text).replace("\n", "<br/>")
 
 
 def generate_report(data: dict, filename: str) -> str:
@@ -39,7 +45,7 @@ def generate_report(data: dict, filename: str) -> str:
     else:
         pred_label = prediction or "—"
         pred_conf = data.get("confidence", 0)
-    risk = gemini.get("risk_level", "Unknown")
+    risk = str(gemini.get("risk_level", "Unknown"))
     risk_color = {"High": colors.red, "Medium": colors.orange,
                   "Low": colors.green}.get(risk, colors.grey)
 
@@ -54,11 +60,11 @@ def generate_report(data: dict, filename: str) -> str:
         Paragraph("Scan Summary", section_style),
         Table(
             [
-                ["Modality",    data.get("modality", "—").replace("_", " ").title()],
-                ["Prediction",  pred_label],
+                ["Modality",    _safe_text(data.get("modality", "—").replace("_", " ").title())],
+                ["Prediction",  _safe_text(pred_label)],
                 ["Confidence",  f"{round(float(pred_conf) * 100, 1)}%"],
-                ["Risk Level",  risk],
-                ["Model Status", data.get("model_status", "—")],
+                ["Risk Level",  _safe_text(risk)],
+                ["Model Status", _safe_text(data.get("model_status", "—"))],
             ],
             colWidths=[5*cm, 11*cm],
             style=TableStyle([
@@ -76,13 +82,13 @@ def generate_report(data: dict, filename: str) -> str:
 
         # --- AI Explanation ---
         Paragraph("AI Explanation (Gemini)", section_style),
-        Paragraph(gemini.get("report", "Not available."), body_style),
+        Paragraph(_safe_text(gemini.get("report", "Not available.")), body_style),
         Spacer(1, 0.3*cm),
 
         # --- Key Findings ---
         # --- Short Summary ---
         Paragraph("Summary for Patient", section_style),
-                Paragraph(gemini.get("summary", "Not available."), body_style),
+        Paragraph(_safe_text(gemini.get("summary", "Not available.")), body_style),
         Spacer(1, 0.5*cm),
 
         HRFlowable(width="100%", thickness=0.5, color=colors.grey),

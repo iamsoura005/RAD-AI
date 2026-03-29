@@ -10,6 +10,15 @@ const normalizedApiBase = withSchemeApiBase
 
 const BASE_URL = `${normalizedApiBase}/api`;
 
+export const BACKEND_BASE_URL = normalizedApiBase;
+
+export const resolveBackendUrl = (pathOrUrl?: string | null): string | null => {
+  if (!pathOrUrl) return null;
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  if (pathOrUrl.startsWith('/')) return `${normalizedApiBase}${pathOrUrl}`;
+  return `${normalizedApiBase}/${pathOrUrl}`;
+};
+
 export interface GeminiResult {
   report: string;
   summary: string;

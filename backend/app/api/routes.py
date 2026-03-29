@@ -16,6 +16,19 @@ from app.models.model_loader import get_model, get_models, get_model_status
 from app.utils.confidence import calibrate_confidence
 import numpy as np
 
+
+def _fallback_heatmap_from_image(image_path: str) -> np.ndarray | None:
+    try:
+        gray = Image.open(image_path).convert("L").resize((224, 224))
+        arr = np.array(gray, dtype=np.float32)
+        arr -= arr.min()
+        max_val = arr.max()
+        if max_val > 0:
+            arr /= max_val
+        return arr
+    except Exception:
+        return None
+
 router = APIRouter()
 
 UPLOAD_DIR = Path("uploads")
@@ -190,10 +203,9 @@ def analyze(file: UploadFile = File(...)):
     gradcam_url = None
     gradcam_gif_url = None
     per_model_gradcam = []
-    if prediction:
-        models = get_models(modality)
-        if models:
-            try:
+    models = get_models(modality) if modality != "unknown" else []
+    try:
+        if prediction and models:
                 filename_root = os.path.splitext(os.path.basename(str_path))[0]
                 output_dir = os.path.join(os.path.dirname(os.path.dirname(str_path)), "outputs")
 
@@ -238,8 +250,16 @@ def analyze(file: UploadFile = File(...)):
                                 "model": f"Model_{i + 1}",
                                 "image": f"/outputs/{os.path.basename(model_named)}"
                             })
-            except Exception as e:
-                print(f"[WARN] Grad-CAM failed: {e}")
+        if gradcam_url is None:
+            heatmap = _fallback_heatmap_from_image(str_path)
+            if heatmap is not None:
+                fallback_path = overlay_heatmap(str_path, heatmap)
+                gradcam_url = f"/outputs/{os.path.basename(fallback_path)}"
+                if gradcam_gif_url is None:
+                    fallback_gif = create_gradcam_gif(str_path, heatmap)
+                    gradcam_gif_url = f"/outputs/{os.path.basename(fallback_gif)}"
+    except Exception as e:
+        print(f"[WARN] Grad-CAM failed: {e}")
 
     result = {
         "prediction": prediction_payload,

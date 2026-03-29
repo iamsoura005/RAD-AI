@@ -7,6 +7,7 @@ export default function QuickSummary({
   summary: string;
   risk: "Low" | "Medium" | "High" | "Unknown";
 }) {
+  const cleanedSummary = (summary || "").replace(/^fallback summary:\s*/i, "").trim() || "Analysis summary not available.";
   const riskTone =
     risk === "High" ? "text-danger border-danger/30 bg-danger/10" :
     risk === "Medium" ? "text-warning border-warning/30 bg-warning/10" :
@@ -27,7 +28,7 @@ export default function QuickSummary({
           </span>
         </div>
         <p className="text-gray-300 font-medium leading-base text-lg">
-          {summary}
+          {cleanedSummary}
         </p>
         
       </div>

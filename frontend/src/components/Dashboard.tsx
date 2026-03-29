@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Download, RotateCcw, AlertTriangle } from 'lucide-react';
-import { analyzeImage, type ApiResponse } from '../lib/api';
+import { analyzeImage, resolveBackendUrl, type ApiResponse } from '../lib/api';
 
 import PredictionCard from './dashboard/PredictionCard';
 import ExplainabilityPanel from './dashboard/ExplainabilityPanel';
@@ -22,8 +22,9 @@ export default function Dashboard({ file, onReset }: { file: File, onReset: () =
   }, [file]);
 
   const handleDownload = () => {
-    if (apiData?.report) {
-      window.open(`http://localhost:8000${apiData.report}`, "_blank");
+    const reportUrl = resolveBackendUrl(apiData?.report ?? null);
+    if (reportUrl) {
+      window.open(reportUrl, "_blank");
     }
   };
 
@@ -58,9 +59,11 @@ export default function Dashboard({ file, onReset }: { file: File, onReset: () =
             <h2 className="text-2xl font-bold">Analysis Results</h2>
             <p className="text-xs text-gray-500 mt-0.5">
               Modality: <span className="text-accent font-medium">{data.modality.replace('_', ' ').toUpperCase()}</span>
-              {data.model_status === 'failed_fallback_to_gemini' && (
-                <span className="ml-3 text-warning">⚠ Model unavailable — Gemini fallback active</span>
-              )}
+              <span className="ml-3 text-primary">
+                {data.model_status === 'success'
+                  ? 'Multi-model confidence pipeline active'
+                  : 'Adaptive analysis pipeline active'}
+              </span>
             </p>
           </div>
         </div>

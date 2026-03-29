@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Layers } from 'lucide-react';
+import { resolveBackendUrl } from '../../lib/api';
 
 export default function ExplainabilityPanel({
   file,
@@ -23,9 +24,9 @@ export default function ExplainabilityPanel({
   
   // URL Object for image preview
   const imageUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
-  const overlaySrc = overlayUrl ? `http://localhost:8000${overlayUrl}` : null;
-  const gradcamSrc = gradcamUrl ? `http://localhost:8000${gradcamUrl}` : null;
-  const gradcamGifSrc = gradcamGifUrl ? `http://localhost:8000${gradcamGifUrl}` : null;
+  const overlaySrc = resolveBackendUrl(overlayUrl);
+  const gradcamSrc = resolveBackendUrl(gradcamUrl);
+  const gradcamGifSrc = resolveBackendUrl(gradcamGifUrl);
   const showSegmentationUnavailable = showOverlay && overlayMode === 'segmentation' && !overlaySrc && modality === "brain";
   const showGradcamUnavailable = showOverlay && overlayMode === 'gradcam' && !gradcamSrc;
 
@@ -188,7 +189,7 @@ export default function ExplainabilityPanel({
               <div key={item.model} className="rounded-lg border border-cardBorder bg-black/30 p-3">
                 <p className="text-xs text-gray-400 mb-2">{item.model}</p>
                 <img
-                  src={`http://localhost:8000${item.image}`}
+                  src={resolveBackendUrl(item.image) ?? ''}
                   alt={`${item.model} Grad-CAM`}
                   className="w-full rounded-md"
                 />
