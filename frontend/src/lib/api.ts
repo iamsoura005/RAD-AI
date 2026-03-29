@@ -1,4 +1,9 @@
-const BASE_URL = `${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/api`;
+const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const normalizedApiBase = (rawApiUrl && rawApiUrl.length > 0 ? rawApiUrl : "http://localhost:8000")
+  .replace(/\/+$/, "")
+  .replace(/\/api$/i, "");
+
+const BASE_URL = `${normalizedApiBase}/api`;
 
 export interface GeminiResult {
   report: string;
@@ -57,8 +62,10 @@ export const analyzeImage = async (file: File): Promise<ApiResponse> => {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Server error: ${res.status}`);
+    const errJson = await res.json().catch(() => null);
+    const errText = await res.text().catch(() => "");
+    const detail = errJson?.detail || errText || `Server error: ${res.status}`;
+    throw new Error(`${detail} (endpoint: ${BASE_URL}/analyze)`);
   }
 
   return res.json();
