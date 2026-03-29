@@ -1,6 +1,40 @@
 import tensorflow as tf
 import os
 
+
+def _drop_quantization_config(kwargs: dict) -> dict:
+    cleaned = dict(kwargs)
+    cleaned.pop("quantization_config", None)
+    return cleaned
+
+
+class CompatDense(tf.keras.layers.Dense):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **_drop_quantization_config(kwargs))
+
+
+class CompatConv2D(tf.keras.layers.Conv2D):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **_drop_quantization_config(kwargs))
+
+
+class CompatDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **_drop_quantization_config(kwargs))
+
+
+class CompatSeparableConv2D(tf.keras.layers.SeparableConv2D):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **_drop_quantization_config(kwargs))
+
+
+CUSTOM_OBJECTS = {
+    "Dense": CompatDense,
+    "Conv2D": CompatConv2D,
+    "DepthwiseConv2D": CompatDepthwiseConv2D,
+    "SeparableConv2D": CompatSeparableConv2D,
+}
+
 # Models live in the parent of the backend/ folder (i.e., "best data set/")
 _DEFAULT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _MODEL_ROOT = os.getenv("MODEL_ROOT", _DEFAULT_ROOT)
@@ -34,10 +68,15 @@ def load_models():
         models[modality] = []
         model_errors[modality] = []
         for path in paths:
-            abs_path = os.path.abspath(os.path.join(os.path.dirname(__file__), path))
+            abs_path = os.path.abspath(path)
             if os.path.exists(abs_path):
                 try:
-                    models[modality].append(tf.keras.models.load_model(abs_path, compile=False))
+                    loaded = tf.keras.models.load_model(
+                        abs_path,
+                        compile=False,
+                        custom_objects=CUSTOM_OBJECTS,
+                    )
+                    models[modality].append(loaded)
                     print(f"[OK] Loaded model: {modality} ← {abs_path}")
                 except Exception as e:
                     err_msg = f"{abs_path}: {e}"
