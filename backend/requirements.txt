@@ -6,6 +6,7 @@ numpy
 opencv-python-headless
 imageio
 google-genai
+requests
 python-multipart
 reportlab
 python-dotenv

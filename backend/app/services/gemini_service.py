@@ -1,11 +1,23 @@
-import os
+import concurrent.futures
 import json
+import os
 import re
-from google import genai
-from google.genai import types
+
 import dotenv
 import requests
-import concurrent.futures
+from google import genai
+from google.genai import types
+
+
+def _env_flag(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _explain_timeout_sec() -> float:
+    try:
+        return float(os.getenv("GEMINI_TIMEOUT_SEC", "2.5"))
+    except ValueError:
+        return 2.5
 
 
 def _get_gemini_api_key() -> str:
@@ -22,40 +34,47 @@ def _has_usable_gemini_key() -> bool:
     return not any(lowered.startswith(p) for p in blocked_prefixes) and len(key) > 20
 
 
-def _local_fallback(modality: str, prediction: dict | None = None, reason: str = "local_fallback") -> dict:
-    label_by_modality = {
-        "brain": "No Tumor",
-        "chest_ct": "Normal",
-        "chest_xray": "Normal",
-        "bone": "Normal",
-        "unknown": "Normal",
-    }
-    risk_by_modality = {
-        "brain": "Medium",
-        "chest_ct": "Low",
-        "chest_xray": "Low",
-        "bone": "Low",
-        "unknown": "Low",
-    }
+def _risk_from_confidence(confidence: float) -> str:
+    if confidence >= 0.85:
+        return "High"
+    if confidence >= 0.6:
+        return "Medium"
+    if confidence > 0:
+        return "Low"
+    return "Unknown"
 
-    label = (prediction or {}).get("label") or label_by_modality.get(modality, "Normal")
-    conf = float((prediction or {}).get("confidence", 0.82))
-    risk = risk_by_modality.get(modality, "Low")
+
+def _model_based_explanation(modality: str, prediction: dict, reason: str = "model_explainer") -> dict:
+    label = str(prediction.get("label", "Unavailable"))
+    confidence = float(prediction.get("confidence", 0.0))
+    risk = _risk_from_confidence(confidence)
+    conf_pct = round(confidence * 100, 1)
 
     return {
         "report": (
-            f"Automated fallback report for {modality}. "
-            f"Primary prediction: {label}. "
-            "Findings suggest a non-emergent pattern based on available model/fallback context. "
-            "Clinical correlation and radiologist review are recommended."
+            f"Model-driven analysis for {modality}: the ensemble selected '{label}' with {conf_pct}% confidence. "
+            "This summary is derived directly from trained model outputs. "
+            "Please correlate with full clinical context and radiologist interpretation."
         ),
-        "summary": f"Fallback summary: {label} ({round(conf * 100, 1)}% confidence).",
+        "summary": f"Model result: {label} ({conf_pct}% confidence).",
         "risk_level": risk,
-        "simulated_prediction": label,
-        "simulated_confidence": conf,
         "source": reason,
         "raw": "",
     }
+
+
+def _analysis_unavailable(reason: str = "analysis_unavailable") -> dict:
+    return {
+        "report": (
+            "Validated model prediction is unavailable and remote explanation services could not be reached. "
+            "Please retry after confirming model status and API keys."
+        ),
+        "summary": "No validated diagnosis available.",
+        "risk_level": "Unknown",
+        "source": reason,
+        "raw": "",
+    }
+
 
 def _get_client():
     api_key = _get_gemini_api_key()
@@ -66,8 +85,8 @@ def _get_client():
 
 def detect_modality_with_gemini(image_path: str) -> str:
     """
-    Sends the image to Gemini very quickly to determine its modality type.
-    Must return one of: 'brain', 'chest_ct', 'chest_xray', 'bone', or 'unknown'.
+    Sends the image to Gemini quickly to determine modality type.
+    Returns one of: 'brain', 'chest_ct', 'chest_xray', 'bone', or 'unknown'.
     """
     if not _has_usable_gemini_key():
         return "unknown"
@@ -77,11 +96,16 @@ def detect_modality_with_gemini(image_path: str) -> str:
             image_bytes = f.read()
 
         suffix = os.path.splitext(image_path)[1].lower()
-        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                    ".png": "image/png", ".bmp": "image/bmp", ".tiff": "image/tiff"}
+        mime_map = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+        }
         mime_type = mime_map.get(suffix, "image/jpeg")
 
-        prompt = """You are a routing AI. Look at this medical image. 
+        prompt = """You are a routing AI. Look at this medical image.
 Return EXACTLY ONE of the following raw strings without quotes or markdown:
 - brain (if it is an MRI or scan of the head/brain)
 - chest_ct (if it is a CT scan of the lungs/chest)
@@ -89,21 +113,19 @@ Return EXACTLY ONE of the following raw strings without quotes or markdown:
 - bone (if it is an X-ray of an extremity or bone fracture)
 - unknown (if it is none of the above)
 """
+
         client = _get_client()
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[prompt, image_part],
         )
 
-        modality = response.text.strip().lower()
+        modality = (response.text or "").strip().lower()
         valid = {"brain", "chest_ct", "chest_xray", "bone"}
-        
-        # Clean up any weird responses
-        for v in valid:
-            if v in modality:
-                return v
+        for value in valid:
+            if value in modality:
+                return value
         return "unknown"
     except Exception as e:
         print(f"[WARN] Gemini routing failed: {e}")
@@ -112,164 +134,162 @@ Return EXACTLY ONE of the following raw strings without quotes or markdown:
 
 def call_minimax_fallback(modality: str) -> dict:
     """
-    Sub-5-second fallback using MiniMax M2.5 via OpenRouter.
-    Since MiniMax is text-only here, we ask it to hallucinate a highly realistic
-    dataset-style prediction based purely on the modality.
+    Optional text fallback via OpenRouter. Disabled by default because mock
+    diagnoses are not desired in production.
     """
+    if not _env_flag("ENABLE_OPENROUTER_FALLBACK", "false"):
+        return _analysis_unavailable("analysis_unavailable")
+
     dotenv.load_dotenv(override=True)
     url = "https://openrouter.ai/api/v1/chat/completions"
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        return _local_fallback(modality, reason="local_no_openrouter_key")
+        return _analysis_unavailable("analysis_unavailable")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
-    prompt = f"""You are a medical AI fallback generator. The primary ML model analyzing a {modality} scan has failed due to a timeout.
-To preserve the dashboard experience, simulate a highly realistic, dataset-like clinical prediction for a {modality} scan.
+    prompt = f"""You are assisting with a medical workflow for modality {modality}.
+The primary ML model prediction is unavailable. Do not invent a diagnosis label.
 
-Return purely a JSON object without markdown fences, formatted exactly as:
+Return valid JSON (no markdown) with this schema:
 {{
-  "report": "A simulated structured medical report (Findings, Interpretation, Recommendation) for this pathology...",
-  "summary": "Simulated short summary.",
-  "risk_level": "Medium",
-  "simulated_prediction": "Simulated Pathology Name (e.g. Clavicle Fracture, Viral Pneumonia, etc.)",
-  "simulated_confidence": 0.94
+  "report": "Brief operational note and recommendation to retry/verify model status.",
+  "summary": "Short status summary.",
+  "risk_level": "Unknown"
 }}
 """
+
     payload = {
         "model": "minimax/minimax-m2.5:free",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3
+        "temperature": 0.3,
     }
 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=4.0)
         if response.status_code >= 400:
             print(f"[WARN] MiniMax/OpenRouter HTTP {response.status_code}: {response.text[:200]}")
-            return _local_fallback(modality, reason="local_openrouter_http_error")
+            return _analysis_unavailable("analysis_unavailable")
 
         data = response.json()
         choices = data.get("choices", []) if isinstance(data, dict) else []
         if not choices:
-            return _local_fallback(modality, reason="local_openrouter_no_choices")
+            return _analysis_unavailable("analysis_unavailable")
 
         raw = choices[0].get("message", {}).get("content", "").strip()
         if not raw:
-            return _local_fallback(modality, reason="local_openrouter_empty_content")
+            return _analysis_unavailable("analysis_unavailable")
 
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
         parsed = json.loads(raw)
+        parsed.setdefault("report", "AI fallback unavailable.")
+        parsed.setdefault("summary", "No validated diagnosis available.")
+        parsed.setdefault("risk_level", "Unknown")
         parsed["source"] = "minimax_fallback"
         parsed["raw"] = raw
         return parsed
     except Exception as e:
         print("[WARN] MiniMax OpenRouter failed:", e)
-        return _local_fallback(modality, reason="local_failed_all")
+        return _analysis_unavailable("analysis_unavailable")
+
 
 def analyze_with_gemini(image_path: str, prediction: dict | None, modality: str = "unknown") -> dict:
     """
-    Uses Gemini as:
-      - PRIMARY explainer when model succeeded (explains the prediction)
-      - FALLBACK analyzer when model failed (attempts raw diagnosis from image + simulated scores)
-    Always enforces a 4.5 second timeout. If exceeded, falls back to MiniMax.
+    Fast-path behavior:
+      - If model prediction exists, return model-based explanation immediately.
+      - Optional remote Gemini explanation can be enabled with ENABLE_REMOTE_EXPLANATION=true.
+      - If no model prediction, do not invent diagnosis labels.
     """
+    if prediction is not None and not _env_flag("ENABLE_REMOTE_EXPLANATION", "false"):
+        return _model_based_explanation(modality, prediction)
+
     if not _has_usable_gemini_key():
+        if prediction is not None:
+            return _model_based_explanation(modality, prediction)
         return call_minimax_fallback(modality)
 
     try:
-        # Load image as bytes for the new SDK
         with open(image_path, "rb") as f:
             image_bytes = f.read()
 
-        # Detect MIME type
         suffix = os.path.splitext(image_path)[1].lower()
-        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                    ".png": "image/png", ".bmp": "image/bmp", ".tiff": "image/tiff"}
+        mime_map = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+        }
         mime_type = mime_map.get(suffix, "image/jpeg")
 
         if prediction:
             context_block = f"""
 The primary ML model has already made a prediction:
 - Detected Class: {prediction['label']}
-- Confidence: {round(prediction['confidence'] * 100, 1)}%
-- Risk Level: {prediction.get('confidence_level', 'Unknown')}
-- Modality: {prediction['modality']}
+- Confidence: {round(float(prediction['confidence']) * 100, 1)}%
+- Modality: {modality}
 
-Your job is to EXPLAIN this prediction clinically. Do NOT override it.
+Explain this prediction clinically. Do NOT override it.
 """
         else:
             context_block = """
-The primary ML model FAILED to produce a prediction.
-Perform your best medical image analysis directly from the image provided.
-You MUST invent a highly realistic simulated_prediction (a typical diagnosis label) and simulated_confidence (between 0.70 and 0.99).
+The primary ML model failed to produce a validated prediction.
+Do not invent diagnosis labels. Provide operational guidance only.
 """
 
-        prompt = f"""You are a professional radiologist AI reviewing a medical scan.
+        prompt = f"""You are a professional radiology assistant.
 
 {context_block}
 
-Write a structured medical-style report including:
-1. Findings
-2. Interpretation
-3. Risk Assessment
-4. Recommendation
-
-Also provide:
-- Short summary (2 lines)
-- A simulated_prediction string and simulated_confidence float when the model failed.
-
-IMPORTANT: Respond ONLY in valid JSON with NO markdown fences.
-
+Return only valid JSON with this schema:
 {{
   "report": "...",
   "summary": "...",
-  "risk_level": "Low | Medium | High",
-  "simulated_prediction": "Diagnosis Name",
-  "simulated_confidence": 0.95
+  "risk_level": "Low | Medium | High | Unknown"
 }}
 """
-        
+
         client = _get_client()
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
 
-        def _gemini_call():
+        def _gemini_call() -> str:
             resp = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[prompt, image_part],
             )
-            return resp.text.strip()
+            return (resp.text or "").strip()
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_gemini_call)
-                raw = future.result(timeout=4.5)
+                raw = future.result(timeout=_explain_timeout_sec())
         except concurrent.futures.TimeoutError:
-            print("[WARN] Gemini timed out (>4.5s)! Triggering MiniMax fallback...")
+            print("[WARN] Gemini timed out; using local explanation.")
+            if prediction is not None:
+                return _model_based_explanation(modality, prediction, reason="model_explainer_timeout")
             return call_minimax_fallback(modality)
 
-        # Strip markdown code fences if present
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
 
         parsed = json.loads(raw)
+        parsed.setdefault("report", "AI explanation unavailable.")
+        parsed.setdefault("summary", "No summary available.")
+        parsed.setdefault("risk_level", "Unknown")
         parsed["source"] = "gemini"
         parsed["raw"] = raw
-
-        if prediction:
-            parsed.setdefault("simulated_prediction", prediction.get("label", "Unavailable"))
-            parsed.setdefault("simulated_confidence", prediction.get("confidence", 0.0))
         return parsed
 
     except json.JSONDecodeError:
-        if prediction:
-            return _local_fallback(modality, prediction=prediction, reason="local_gemini_parse_error")
+        if prediction is not None:
+            return _model_based_explanation(modality, prediction, reason="model_explainer_parse_fallback")
         return call_minimax_fallback(modality)
     except Exception as e:
         print(f"[ERROR] Gemini failed rapidly: {e}")
-        if prediction:
-            return _local_fallback(modality, prediction=prediction, reason="local_gemini_error")
+        if prediction is not None:
+            return _model_based_explanation(modality, prediction, reason="model_explainer_error")
         return call_minimax_fallback(modality)

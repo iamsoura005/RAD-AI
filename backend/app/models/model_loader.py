@@ -1,5 +1,8 @@
 import tensorflow as tf
 import os
+from urllib.parse import quote
+
+import requests
 
 
 def _drop_quantization_config(kwargs: dict) -> dict:
@@ -57,6 +60,43 @@ LABEL_MAPS = {
 models: dict = {}
 model_errors: dict = {}
 
+
+def _is_lfs_pointer(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(256).decode("utf-8", errors="ignore")
+        return head.startswith("version https://git-lfs.github.com/spec/v1")
+    except Exception:
+        return False
+
+
+def _download_model_binary(abs_path: str) -> None:
+    base_url = os.getenv(
+        "MODEL_FILES_BASE_URL",
+        "https://media.githubusercontent.com/media/iamsoura005/RAD-AI/main/model_files",
+    ).rstrip("/")
+    filename = os.path.basename(abs_path)
+    url = f"{base_url}/{quote(filename)}"
+
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    response = requests.get(url, stream=True, timeout=120)
+    response.raise_for_status()
+
+    with open(abs_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+
+    if _is_lfs_pointer(abs_path):
+        raise RuntimeError("downloaded file is still an LFS pointer")
+
+
+def _ensure_model_binary(abs_path: str) -> None:
+    if os.path.exists(abs_path) and not _is_lfs_pointer(abs_path):
+        return
+    _download_model_binary(abs_path)
+    print(f"[INFO] Downloaded model binary: {abs_path}")
+
 def load_models():
     """Load all available .h5 models at startup."""
     for modality, paths in MODEL_PATHS.items():
@@ -69,23 +109,22 @@ def load_models():
         model_errors[modality] = []
         for path in paths:
             abs_path = os.path.abspath(path)
-            if os.path.exists(abs_path):
-                try:
-                    loaded = tf.keras.models.load_model(
-                        abs_path,
-                        compile=False,
-                        custom_objects=CUSTOM_OBJECTS,
-                    )
-                    models[modality].append(loaded)
-                    print(f"[OK] Loaded model: {modality} ← {abs_path}")
-                except Exception as e:
-                    err_msg = f"{abs_path}: {e}"
-                    model_errors[modality].append(err_msg)
-                    print(f"[ERROR] Failed to load {modality}: {e}")
-            else:
-                err_msg = f"missing: {abs_path}"
-                model_errors[modality].append(err_msg)
+            if not os.path.exists(abs_path):
                 print(f"[WARN] Model file missing: {abs_path}")
+
+            try:
+                _ensure_model_binary(abs_path)
+                loaded = tf.keras.models.load_model(
+                    abs_path,
+                    compile=False,
+                    custom_objects=CUSTOM_OBJECTS,
+                )
+                models[modality].append(loaded)
+                print(f"[OK] Loaded model: {modality} ← {abs_path}")
+            except Exception as e:
+                err_msg = f"{abs_path}: {e}"
+                model_errors[modality].append(err_msg)
+                print(f"[ERROR] Failed to load {modality}: {e}")
 
 def get_model(modality: str):
     modality_models = models.get(modality, [])

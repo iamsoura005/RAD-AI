@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Download, RotateCcw, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Download, RotateCcw, AlertTriangle, Loader2 } from 'lucide-react';
 import { analyzeImage, resolveBackendUrl, type ApiResponse } from '../lib/api';
 
 import PredictionCard from './dashboard/PredictionCard';
@@ -39,7 +39,17 @@ export default function Dashboard({ file, onReset }: { file: File, onReset: () =
     );
   }
 
-  if (!apiData) return null;
+  if (!apiData) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <Loader2 className="w-10 h-10 text-primary animate-spin" />
+        <h2 className="text-xl font-semibold">Analyzing Scan</h2>
+        <p className="text-sm text-gray-400 text-center max-w-md">
+          Running ML inference and preparing explainability outputs. This usually takes a few seconds.
+        </p>
+      </div>
+    );
+  }
 
   const { data, report } = apiData;
 

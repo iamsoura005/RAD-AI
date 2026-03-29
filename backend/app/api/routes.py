@@ -37,6 +37,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
+ENABLE_GRADCAM_GIF = os.getenv("ENABLE_GRADCAM_GIF", "false").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_PER_MODEL_GRADCAM = os.getenv("ENABLE_PER_MODEL_GRADCAM", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _filename_modality_hint(filename: str) -> str:
@@ -214,48 +216,49 @@ def analyze(file: UploadFile = File(...)):
 
                 if os.path.exists(ensemble_path):
                     gradcam_url = f"/outputs/{os.path.basename(ensemble_path)}"
-                if os.path.exists(ensemble_gif_path):
+                if ENABLE_GRADCAM_GIF and os.path.exists(ensemble_gif_path):
                     gradcam_gif_url = f"/outputs/{os.path.basename(ensemble_gif_path)}"
 
-                if gradcam_url is None or gradcam_gif_url is None:
+                if gradcam_url is None or (ENABLE_GRADCAM_GIF and gradcam_gif_url is None):
                     heatmap = ensemble_gradcam(models, str_path)
                     if heatmap is not None:
                         if gradcam_url is None:
                             ensemble_path = overlay_heatmap(str_path, heatmap)
                             gradcam_url = f"/outputs/{os.path.basename(ensemble_path)}"
-                        if gradcam_gif_url is None:
+                        if ENABLE_GRADCAM_GIF and gradcam_gif_url is None:
                             ensemble_gif_path = create_gradcam_gif(str_path, heatmap)
                             gradcam_gif_url = f"/outputs/{os.path.basename(ensemble_gif_path)}"
 
-                for i, model in enumerate(models):
-                    model_path = os.path.join(output_dir, f"{filename_root}_gradcam_m{i + 1}.jpg")
-                    if os.path.exists(model_path):
-                        per_model_gradcam.append({
-                            "model": f"Model_{i + 1}",
-                            "image": f"/outputs/{os.path.basename(model_path)}"
-                        })
-                    elif gradcam_url is not None:
-                        continue
-                    else:
-                        heatmap = ensemble_gradcam([model], str_path)
-                        if heatmap is not None:
-                            model_path = overlay_heatmap(str_path, heatmap)
-                            model_named = os.path.join(output_dir, f"{filename_root}_gradcam_m{i + 1}.jpg")
-                            if model_path != model_named:
-                                try:
-                                    os.replace(model_path, model_named)
-                                except Exception:
-                                    model_named = model_path
+                if ENABLE_PER_MODEL_GRADCAM:
+                    for i, model in enumerate(models):
+                        model_path = os.path.join(output_dir, f"{filename_root}_gradcam_m{i + 1}.jpg")
+                        if os.path.exists(model_path):
                             per_model_gradcam.append({
                                 "model": f"Model_{i + 1}",
-                                "image": f"/outputs/{os.path.basename(model_named)}"
+                                "image": f"/outputs/{os.path.basename(model_path)}"
                             })
+                        elif gradcam_url is not None:
+                            continue
+                        else:
+                            heatmap = ensemble_gradcam([model], str_path)
+                            if heatmap is not None:
+                                model_path = overlay_heatmap(str_path, heatmap)
+                                model_named = os.path.join(output_dir, f"{filename_root}_gradcam_m{i + 1}.jpg")
+                                if model_path != model_named:
+                                    try:
+                                        os.replace(model_path, model_named)
+                                    except Exception:
+                                        model_named = model_path
+                                per_model_gradcam.append({
+                                    "model": f"Model_{i + 1}",
+                                    "image": f"/outputs/{os.path.basename(model_named)}"
+                                })
         if gradcam_url is None:
             heatmap = _fallback_heatmap_from_image(str_path)
             if heatmap is not None:
                 fallback_path = overlay_heatmap(str_path, heatmap)
                 gradcam_url = f"/outputs/{os.path.basename(fallback_path)}"
-                if gradcam_gif_url is None:
+                if ENABLE_GRADCAM_GIF and gradcam_gif_url is None:
                     fallback_gif = create_gradcam_gif(str_path, heatmap)
                     gradcam_gif_url = f"/outputs/{os.path.basename(fallback_gif)}"
     except Exception as e:

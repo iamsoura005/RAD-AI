@@ -94,7 +94,7 @@ def generate_report(data: dict, filename: str) -> str:
         HRFlowable(width="100%", thickness=0.5, color=colors.grey),
         Spacer(1, 0.2*cm),
         Paragraph(
-            "<font size='8' color='grey'>⚠ This report is AI-generated and is intended for informational "
+            "<font size='8' color='grey'>Warning: This report is AI-generated and is intended for informational "
             "purposes only. It is NOT a substitute for professional medical diagnosis.</font>",
             body_style
         ),
