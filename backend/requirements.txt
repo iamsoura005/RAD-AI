@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+tensorflow
+pillow
+numpy
+imageio
+google-genai
+python-multipart
+reportlab
+python-dotenv
