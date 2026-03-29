@@ -26,6 +26,42 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
 
 
+def _filename_modality_hint(filename: str) -> str:
+    name = (filename or "").lower()
+    token_map = {
+        "bone": ["bone", "fracture", "xray", "x-ray", "humerus", "radius", "ulna", "femur", "tibia"],
+        "chest_xray": ["chest", "lung", "cxr", "pneumonia", "xray", "x-ray"],
+        "chest_ct": ["ct", "ctscan", "scan", "thorax"],
+        "brain": ["brain", "mri", "flair", "tumor", "head"],
+    }
+
+    for modality, tokens in token_map.items():
+        if any(token in name for token in tokens):
+            return modality
+    return "unknown"
+
+
+def _best_available_model_prediction(image_path: str) -> tuple[str, dict | None]:
+    candidates: list[tuple[str, dict, float]] = []
+    for modality in ["brain", "chest_ct", "chest_xray", "bone"]:
+        if not get_models(modality):
+            continue
+
+        result = ensemble_predict(image_path, modality)
+        if not result or not result.get("ensemble"):
+            continue
+
+        conf = float(result["ensemble"].get("confidence", 0.0))
+        candidates.append((modality, result, conf))
+
+    if not candidates:
+        return "unknown", None
+
+    candidates.sort(key=lambda x: x[2], reverse=True)
+    best_modality, best_result, _ = candidates[0]
+    return best_modality, best_result
+
+
 @router.get("/modality/status")
 def modality_status():
     if modality_model is None:
@@ -91,10 +127,9 @@ def analyze(file: UploadFile = File(...)):
     # --- Step 1: CNN routing then Gemini fallback ---
     modality = predict_modality(str_path)
 
-    # Filename hint fallback (bone-only) when modality is unknown
-    name_hint = (file.filename or "").lower()
-    if modality == "unknown" and any(token in name_hint for token in ["bone", "fracture", "xray", "x-ray"]):
-        modality = "bone"
+    # Filename hint fallback when modality is unknown
+    if modality == "unknown":
+        modality = _filename_modality_hint(file.filename or "")
 
     if modality == "unknown":
         modality = detect_modality_with_gemini(str_path)
@@ -103,6 +138,13 @@ def analyze(file: UploadFile = File(...)):
     ensemble_result = None
     if modality != "unknown":
         ensemble_result = ensemble_predict(str_path, modality)
+
+    # If routing failed or selected modality has no usable model, probe all loaded models.
+    if ensemble_result is None:
+        auto_modality, auto_result = _best_available_model_prediction(str_path)
+        if auto_result is not None:
+            modality = auto_modality
+            ensemble_result = auto_result
 
     prediction = ensemble_result["ensemble"] if ensemble_result else None
         
