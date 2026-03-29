@@ -1,5 +1,10 @@
 const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
-const normalizedApiBase = (rawApiUrl && rawApiUrl.length > 0 ? rawApiUrl : "http://localhost:8000")
+const candidateApiBase = rawApiUrl && rawApiUrl.length > 0 ? rawApiUrl : "http://localhost:8000";
+const withSchemeApiBase = /^https?:\/\//i.test(candidateApiBase)
+  ? candidateApiBase
+  : `https://${candidateApiBase}`;
+
+const normalizedApiBase = withSchemeApiBase
   .replace(/\/+$/, "")
   .replace(/\/api$/i, "");
 
