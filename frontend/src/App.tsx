@@ -16,7 +16,7 @@ function App() {
 
   const handleUploadComplete = (file: File) => {
     setSelectedFile(file);
-    setAppState('processing');
+    setAppState('dashboard');
   };
 
   const handleProcessingComplete = () => {
